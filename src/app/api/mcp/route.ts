@@ -154,7 +154,14 @@ export async function POST(request: NextRequest) {
   const auth = await authenticateMcp(request);
   if (!auth.authenticated) return auth.response;
 
-  const rl = checkRateLimit(`mcp:${auth.context.userId}`, 60, 60_000);
+  // Self-host override (local patch, not upstream): PF_MCP_RATE_LIMIT_PER_MIN
+  // sets the per-minute ceiling for this endpoint. Default 60 keeps upstream
+  // behaviour; 0 or negative disables the limiter entirely, which is reasonable
+  // for a single-user instance that has no need to throttle itself.
+  const mcpPerMin = Number.parseInt(process.env.PF_MCP_RATE_LIMIT_PER_MIN ?? "60", 10);
+  const rl = mcpPerMin > 0
+    ? checkRateLimit(`mcp:${auth.context.userId}`, mcpPerMin, 60_000)
+    : { allowed: true, remaining: 0, resetAt: Date.now() };
   if (!rl.allowed) {
     return NextResponse.json(
       { error: "Rate limit exceeded for MCP endpoint" },
