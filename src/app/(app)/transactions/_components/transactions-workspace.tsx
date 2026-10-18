@@ -198,6 +198,30 @@ export function TransactionsWorkspace({
   const { sortPref, setSortPref, cycleSort } = useTxSortPref(() => setPage(0));
   const { colFilters, setColFilters, findColFilter, setColFilter } = useTxFilterPrefs(() => setPage(0));
 
+  // A drill-through URL owns the dimensions it names. Persisted per-column
+  // filters are ANDed with the URL (`buildTransactionQuery` pushes both), so a
+  // saved `category = Transfers` column filter made every category drill-through
+  // render EMPTY while the identical query without it — the budgets drawer —
+  // showed the row. Nothing surfaced the conflict: the URL looked right and the
+  // API returned data for the URL's own filter.
+  //
+  // Clearing the conflicting column filter keeps the single filter state the
+  // page displays in agreement with the query it actually runs. Only the
+  // dimension the URL names is cleared, so an unrelated saved filter survives a
+  // drill.
+  useEffect(() => {
+    if (locked) return;
+    const owned = new Set<string>();
+    if (urlParams.get("categoryId")) owned.add("category");
+    if (urlParams.get("accountId")) owned.add("account");
+    if (urlParams.get("startDate") || urlParams.get("endDate")) owned.add("date");
+    if (owned.size === 0) return;
+    setColFilters((prev) => {
+      const next = prev.filter((f) => !owned.has(f.columnId));
+      return next.length === prev.length ? prev : next;
+    });
+  }, [urlParams, locked, setColFilters]);
+
   // Main list (txns / total / loading) + loadTxns — extracted to
   // useTransactions (FINLYNQ-111 Phase 2). Same deps, fetch URL, {data,total}
   // unwrap, and driving effect; `page` is owned by the page-level state above.
