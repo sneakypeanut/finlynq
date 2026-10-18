@@ -940,7 +940,8 @@ export default function BudgetsPage() {
             {tx.error && <p className="text-sm text-destructive">{tx.error}</p>}
             {!tx.loading && !tx.error && tx.rows.length === 0 && (
               <p className="text-sm text-muted-foreground">
-                Nothing recorded in this category for {getMonthLabel(month)}.
+                Nothing was recorded in this category for {getMonthLabel(month)} — that is why the explorer would
+                open empty.
               </p>
             )}
             {tx.rows.map((t: any) => (
@@ -962,7 +963,7 @@ export default function BudgetsPage() {
             <p className="text-xs text-muted-foreground">
               {tx.total} transaction{tx.total === 1 ? "" : "s"}
             </p>
-            {drill && (
+            {drill && tx.rows.length > 0 && (
               <Link
                 href={buildTxDrillUrl({ categoryId: String(drill.categoryId), startDate: `${month}-01`, endDate: drillEnd })}
                 className="inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline"
