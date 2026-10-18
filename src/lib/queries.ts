@@ -903,6 +903,51 @@ export async function getSpendingByCategory(userId: string, startDate: string, e
     .all();
 }
 
+/**
+ * Budget rows for a month range, for rolling-budget carry chains.
+ * `month` is TEXT `YYYY-MM`, so string comparison is the correct ordering.
+ */
+export async function getBudgetsInRange(userId: string, fromMonth: string, toMonth: string) {
+  return db
+    .select({
+      categoryId: budgets.categoryId,
+      month: budgets.month,
+      amount: budgets.amount,
+    })
+    .from(budgets)
+    .where(and(eq(budgets.userId, userId), gte(budgets.month, fromMonth), lte(budgets.month, toMonth)))
+    .all();
+}
+
+/**
+ * Expense totals per (month, category) over a date range.
+ *
+ * Distinct from getSpendingByCategory, which collapses the range to a single
+ * total. Rolling budgets need the month dimension, and they need expense rows
+ * only (category type E) so transfers never count as budget consumption.
+ */
+export async function getMonthlySpendByCategory(userId: string, startDate: string, endDate: string) {
+  return db
+    .select({
+      month: sql<string>`substr(${transactions.date}, 1, 7)`,
+      categoryId: transactions.categoryId,
+      currency: transactions.currency,
+      spent: sql<number>`SUM(ABS(${transactions.amount}))`,
+    })
+    .from(transactions)
+    .leftJoin(categories, eq(transactions.categoryId, categories.id))
+    .where(
+      and(
+        eq(transactions.userId, userId),
+        gte(transactions.date, startDate),
+        lte(transactions.date, endDate),
+        eq(categories.type, "E")
+      )
+    )
+    .groupBy(sql`substr(${transactions.date}, 1, 7)`, transactions.categoryId, transactions.currency)
+    .all();
+}
+
 export async function getSpendingByCategoryAndCurrency(userId: string, startDate: string, endDate: string) {
   // Stream D Phase 4 — plaintext `categories.name` dropped.
   return db
