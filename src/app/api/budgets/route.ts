@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getBudgets, upsertBudget, deleteBudget, getBudgetRollover, getSpendingByCategoryAndCurrency } from "@/lib/queries";
+import { getBudgets, upsertBudget, deleteBudget, getBudgetRollover, getSpendingByCategoryAndCurrency, getBudgetsInRange, getMonthlySpendByCategory } from "@/lib/queries";
+import { computeRolling, indexHistory, addMonths, budgetYearStart } from "@/lib/budgets/rolling";
 import { requireAuth } from "@/lib/auth/require-auth";
 import { z } from "zod";
 import { validateBody, safeErrorMessage, logApiError } from "@/lib/validate";
@@ -21,6 +22,9 @@ export async function GET(request: NextRequest) {
   const month = request.nextUrl.searchParams.get("month") ?? undefined;
   const displayCurrency = await getDisplayCurrency(userId, request.nextUrl.searchParams.get("currency"));
   const includeRollover = request.nextUrl.searchParams.get("rollover") === "1";
+  // Rolling budgets: chained, signed carry with an annual reset and a 12-month
+  // correction of the base itself. Supersedes the one-month penalty above.
+  const includeRolling = request.nextUrl.searchParams.get("rolling") === "1";
   const includeSpending = request.nextUrl.searchParams.get("spending") === "1";
 
   const data = await getBudgets(userId, month);
@@ -71,7 +75,7 @@ export async function GET(request: NextRequest) {
     }));
   }
 
-  if (includeRollover && month) {
+  if (includeRollover && month && !includeRolling) {
     const rollovers = await getBudgetRollover(userId, month);
     const rolloverMap = new Map(rollovers.map((r: any) => [r.categoryId, r.rolloverAmount]));
 
@@ -79,6 +83,67 @@ export async function GET(request: NextRequest) {
       ...b,
       rolloverAmount: rolloverMap.get(b.categoryId) ?? 0,
     }));
+  }
+
+  if (includeRolling && month) {
+    // The carry chain needs the budget year to date; the streak rule needs the
+    // 12 months before this one, which can reach into the previous year.
+    const yearStart = budgetYearStart(month);
+    const streakStart = addMonths(month, -12);
+    const fromMonth = streakStart < yearStart ? streakStart : yearStart;
+
+    const [y, m] = month.split("-").map(Number);
+    const lastDay = new Date(y, m, 0).getDate();
+
+    const [budgetRows, spendRows] = await Promise.all([
+      getBudgetsInRange(userId, fromMonth, month),
+      getMonthlySpendByCategory(userId, `${fromMonth}-01`, `${month}-${String(lastDay).padStart(2, "0")}`),
+    ]);
+
+    // Convert each (month, category, currency) bucket before summing, so a USD
+    // purchase cannot be compared against a CAD budget at face value.
+    const converted = spendRows.map((r: any) => ({
+      ...r,
+      spent: Math.abs(convertWithRateMap(r.spent, r.currency, rateMap)),
+    }));
+    const { budgetByCategory, spendByCategory } = indexHistory(budgetRows as any, converted as any);
+
+    // Only COMPLETED months may contribute carry. A month still in progress has
+    // not spent its budget yet, and a future month has not spent anything at all,
+    // so counting either would hand the next month a phantom surplus equal to the
+    // whole budget. Dropping those rows makes the chain skip them (a month with no
+    // budget row breaks the chain by design) while keeping the target month's own
+    // base, which is what the row is measured against.
+    const nowMonth = new Date().toISOString().slice(0, 7);
+    for (const m of budgetByCategory.values()) {
+      for (const k of Array.from(m.keys())) {
+        if (k >= nowMonth && k !== month) m.delete(k);
+      }
+    }
+    for (const m of spendByCategory.values()) {
+      for (const k of Array.from(m.keys())) {
+        if (k >= nowMonth && k !== month) m.delete(k);
+      }
+    }
+
+    enriched = enriched.map((b: any) => {
+      const state = computeRolling(
+        b.categoryId,
+        month,
+        budgetByCategory.get(b.categoryId) ?? new Map(),
+        spendByCategory.get(b.categoryId) ?? new Map()
+      );
+      return {
+        ...b,
+        rolloverAmount: state.carryIn,
+        baseAmount: state.baseAmount,
+        adjustedBase: state.adjustedBase,
+        effectiveBudget: state.effectiveBudget,
+        autoAdjustment: state.autoAdjustment,
+        autoAdjustReason: state.autoAdjustReason,
+        streak: state.streak,
+      };
+    });
   }
 
   return NextResponse.json(enriched);

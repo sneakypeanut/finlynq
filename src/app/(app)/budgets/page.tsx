@@ -10,6 +10,7 @@ import { Progress } from "@/components/ui/progress";
 import { Combobox, type ComboboxItemShape } from "@/components/ui/combobox";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { ErrorState } from "@/components/error-state";
 import { PageSkeleton } from "@/components/page-skeleton";
 import { OnboardingTips } from "@/components/onboarding-tips";
@@ -21,7 +22,7 @@ import { useDropdownOrder } from "@/components/dropdown-order-provider";
 import {
   Plus, ChevronLeft, ChevronRight, Trash2, PiggyBank, TrendingDown,
   Wallet, LayoutGrid, Save, FileDown, ArrowRightLeft, Clock,
-  AlertTriangle, ArrowDownRight, Copy,
+  AlertTriangle, ArrowDownRight, Copy, ArrowUpRight, ChevronRight as ChevronRightIcon,
 } from "lucide-react";
 
 type Budget = {
@@ -31,7 +32,15 @@ type Budget = {
   categoryGroup: string;
   month: string;
   amount: number;
+  /** Signed carry: + means money saved earlier this budget year, - means overspent. */
   rolloverAmount?: number;
+  /** Present only when the API ran with `rolling=1`. */
+  baseAmount?: number;
+  adjustedBase?: number;
+  effectiveBudget?: number;
+  autoAdjustment?: number;
+  autoAdjustReason?: string | null;
+  streak?: { direction: "over" | "under" | "mixed" | "none"; over: number; under: number; months: number };
 };
 
 type Category = { id: number; name: string; type: string; group: string };
@@ -71,6 +80,13 @@ export default function BudgetsPage() {
   const [templates, setTemplates] = useState<BudgetTemplate[]>([]);
   const [ageOfMoney, setAgeOfMoney] = useState<AgeOfMoney | null>(null);
   const [mode, setMode] = useState<BudgetMode>("traditional");
+  // Category drill-down: clicking a budget row shows the transactions behind it.
+  const [drill, setDrill] = useState<{ categoryId: number; name: string } | null>(null);
+  const [tx, setTx] = useState<{ loading: boolean; rows: any[]; total: number; error?: string }>({
+    loading: false,
+    rows: [],
+    total: 0,
+  });
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
   const [formError, setFormError] = useState("");
@@ -108,7 +124,7 @@ export default function BudgetsPage() {
 
   const loadData = useCallback(() => {
     setLoadError(false);
-    fetch(`/api/budgets?month=${month}&rollover=1&currency=${encodeURIComponent(displayCurrency)}`)
+    fetch(`/api/budgets?month=${month}&rollover=1&rolling=1&currency=${encodeURIComponent(displayCurrency)}`)
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error("Failed to load budgets"))))
       .then((data) => setBudgets(Array.isArray(data) ? data : []))
       .catch(() => setLoadError(true))
@@ -375,6 +391,30 @@ export default function BudgetsPage() {
   const totalBudget = budgets.reduce((s, b) => s + b.amount, 0);
   const totalSpent = budgets.reduce((s, b) => s + (spendingMap.get(b.categoryId) ?? 0), 0);
   const totalRemaining = totalBudget - totalSpent;
+  useEffect(() => {
+    if (!drill) return;
+    let cancelled = false;
+    const [dy, dm] = month.split("-").map(Number);
+    const endDate = `${month}-${String(new Date(dy, dm, 0).getDate()).padStart(2, "0")}`;
+    setTx({ loading: true, rows: [], total: 0 });
+    fetch(`/api/transactions?categoryId=${drill.categoryId}&startDate=${month}-01&endDate=${endDate}&limit=200`)
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
+      .then((j) => {
+        if (!cancelled) setTx({ loading: false, rows: j.data ?? [], total: j.total ?? j.data?.length ?? 0 });
+      })
+      .catch((e) => {
+        if (!cancelled) setTx({ loading: false, rows: [], total: 0, error: e instanceof Error ? e.message : "Failed to load" });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [drill, month]);
+
+  const drillEnd = (() => {
+    const [dy, dm] = month.split("-").map(Number);
+    return `${month}-${String(new Date(dy, dm, 0).getDate()).padStart(2, "0")}`;
+  })();
+
   const totalRollover = budgets.reduce((s, b) => s + (b.rolloverAmount ?? 0), 0);
 
   // Envelope mode: available to budget = income - total budgeted
@@ -656,10 +696,12 @@ export default function BudgetsPage() {
           </CardHeader>
           <CardContent>
             <p className="text-2xl font-bold">{formatCurrency(totalBudget, displayCurrency)}</p>
-            {totalRollover > 0 && (
-              <p className="text-xs text-amber-600 mt-1 flex items-center gap-1">
-                <ArrowDownRight className="h-3 w-3" />
-                {formatCurrency(totalRollover, displayCurrency)} rolled over
+            {totalRollover !== 0 && (
+              <p className={`text-xs mt-1 flex items-center gap-1 ${totalRollover > 0 ? "text-emerald-600" : "text-rose-600"}`}>
+                {totalRollover > 0 ? <ArrowUpRight className="h-3 w-3" /> : <ArrowDownRight className="h-3 w-3" />}
+                {totalRollover > 0 ? "+" : "−"}
+                {formatCurrency(Math.abs(totalRollover), displayCurrency)}{" "}
+                {totalRollover > 0 ? "carried forward" : "overdrawn"}
               </p>
             )}
           </CardContent>
@@ -785,9 +827,11 @@ export default function BudgetsPage() {
               {items.map((b) => {
                 const spent = spendingMap.get(b.categoryId) ?? 0;
                 const rollover = b.rolloverAmount ?? 0;
-                const effectiveBudget = mode === "traditional" && rollover > 0
-                  ? b.amount - rollover
-                  : b.amount;
+                // Rolling budgets: the server resolves the signed carry and any
+                // 12-month correction of the base itself. Fall back to the
+                // upstream one-month penalty when no rolling state came back.
+                const effectiveBudget =
+                  b.effectiveBudget ?? (mode === "traditional" && rollover > 0 ? b.amount - rollover : b.amount);
                 const rawPct = effectiveBudget > 0 ? (spent / effectiveBudget) * 100 : 0;
                 const pct = Math.min(rawPct, 100);
                 const over = spent > effectiveBudget;
@@ -798,7 +842,17 @@ export default function BudgetsPage() {
                 return (
                   <div
                     key={b.id}
-                    className="rounded-lg px-3 py-3 -mx-3 transition-colors hover:bg-muted/50"
+                    role="button"
+                    tabIndex={0}
+                    title={`Show ${b.categoryName} transactions for ${getMonthLabel(month)}`}
+                    onClick={() => setDrill({ categoryId: b.categoryId, name: b.categoryName })}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        setDrill({ categoryId: b.categoryId, name: b.categoryName });
+                      }
+                    }}
+                    className="group cursor-pointer rounded-lg px-3 py-3 -mx-3 transition-colors hover:bg-muted/50 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
                   >
                     <div className="flex flex-wrap items-center justify-between gap-y-1 mb-1.5">
                       <div className="flex items-center gap-2 min-w-0">
@@ -818,34 +872,45 @@ export default function BudgetsPage() {
                         }`}>
                           {Math.round(rawPct)}%
                         </span>
-                        {rollover > 0 && (
+                        {rollover !== 0 && (
                           <span
-                            className="text-xs font-medium tabular-nums px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700 dark:bg-amber-950/60 dark:text-amber-400 flex items-center gap-0.5"
-                            title={`${formatCurrency(rollover, displayCurrency)} rolled over from last month`}
+                            className={`shrink-0 text-xs font-medium tabular-nums px-1.5 py-0.5 rounded-full flex items-center gap-0.5 ${
+                              rollover > 0
+                                ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300"
+                                : "bg-rose-100 text-rose-700 dark:bg-rose-950/60 dark:text-rose-300"
+                            }`}
+                            title={
+                              rollover > 0
+                                ? `${formatCurrency(rollover, displayCurrency)} carried forward from earlier this budget year`
+                                : `${formatCurrency(Math.abs(rollover), displayCurrency)} overspent earlier this budget year — this month's budget shrinks by that much`
+                            }
                           >
                             <Clock className="h-3 w-3" />
-                            {formatCurrency(rollover, displayCurrency)}
+                            {rollover > 0 ? "+" : "−"}
+                            {formatCurrency(Math.abs(rollover), displayCurrency)}
                           </span>
                         )}
+                        {b.autoAdjustment ? (
+                          <span
+                            className="shrink-0 text-xs font-medium px-1.5 py-0.5 rounded-full bg-sky-100 text-sky-700 dark:bg-sky-950/60 dark:text-sky-300"
+                            title={b.autoAdjustReason ?? "Budget adjusted from 12 months of history"}
+                          >
+                            {b.autoAdjustment > 0 ? "auto ↑" : "auto ↓"}{" "}
+                            {formatCurrency(Math.abs(b.autoAdjustment), displayCurrency)}
+                          </span>
+                        ) : null}
                       </div>
                       <div className="flex items-center gap-2">
                         {mode === "envelope" ? (
-                          <Link
-                            href={buildTxDrillUrl({ categoryId: String(b.categoryId), startDate: budgetMonthStart, endDate: budgetMonthEnd })}
-                            className={`text-sm font-mono tabular-nums hover:underline ${envelopeAvailable < 0 ? "text-rose-600" : ""}`}
-                            title={b.categoryName ? `View ${b.categoryName} transactions for ${getMonthLabel(month)}` : `View transactions for ${getMonthLabel(month)}`}
-                          >
+                          <span className={`text-sm font-mono tabular-nums ${envelopeAvailable < 0 ? "text-rose-600" : ""}`}>
                             {formatCurrency(envelopeAvailable, displayCurrency)} left
-                          </Link>
+                          </span>
                         ) : (
-                          <Link
-                            href={buildTxDrillUrl({ categoryId: String(b.categoryId), startDate: budgetMonthStart, endDate: budgetMonthEnd })}
-                            className={`text-sm font-mono tabular-nums hover:underline ${over ? "text-rose-600" : ""}`}
-                            title={b.categoryName ? `View ${b.categoryName} transactions for ${getMonthLabel(month)}` : `View transactions for ${getMonthLabel(month)}`}
-                          >
+                          <span className={`text-sm font-mono tabular-nums ${over ? "text-rose-600" : ""}`}>
                             {formatCurrency(spent, displayCurrency)} / {formatCurrency(effectiveBudget, displayCurrency)}
-                          </Link>
+                          </span>
                         )}
+                        <ChevronRightIcon className="h-3.5 w-3.5 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100" />
                         <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground" aria-label={`Delete budget for ${b.categoryName}`} onClick={() => setDeleteId(b.id)}>
                           <Trash2 className="h-3 w-3" />
                         </Button>
@@ -862,6 +927,52 @@ export default function BudgetsPage() {
           </Card>
         ))
       )}
+
+      <Sheet open={drill !== null} onOpenChange={(open) => { if (!open) setDrill(null); }}>
+        <SheetContent className="w-full overflow-y-auto sm:max-w-lg">
+          <SheetHeader>
+            <SheetTitle>
+              {drill?.name ?? "Transactions"} · {getMonthLabel(month)}
+            </SheetTitle>
+          </SheetHeader>
+          <div className="mt-4 space-y-1">
+            {tx.loading && <p className="text-sm text-muted-foreground">Loading transactions…</p>}
+            {tx.error && <p className="text-sm text-destructive">{tx.error}</p>}
+            {!tx.loading && !tx.error && tx.rows.length === 0 && (
+              <p className="text-sm text-muted-foreground">
+                Nothing recorded in this category for {getMonthLabel(month)}.
+              </p>
+            )}
+            {tx.rows.map((t: any) => (
+              <div key={t.id} className="flex items-start justify-between gap-3 border-b py-2 last:border-0">
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-medium">{t.payee || "(no payee)"}</p>
+                  <p className="text-xs text-muted-foreground">
+                    {t.date}
+                    {t.accountName ? ` · ${t.accountName}` : ""}
+                  </p>
+                </div>
+                <span className={`shrink-0 font-mono text-sm tabular-nums ${t.amount < 0 ? "" : "text-emerald-600"}`}>
+                  {formatCurrency(t.amount, displayCurrency)}
+                </span>
+              </div>
+            ))}
+          </div>
+          <div className="mt-4 flex items-center justify-between gap-3 border-t pt-3">
+            <p className="text-xs text-muted-foreground">
+              {tx.total} transaction{tx.total === 1 ? "" : "s"}
+            </p>
+            {drill && (
+              <Link
+                href={buildTxDrillUrl({ categoryId: String(drill.categoryId), startDate: `${month}-01`, endDate: drillEnd })}
+                className="inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline"
+              >
+                Open in Transactions <ArrowUpRight className="h-3 w-3" />
+              </Link>
+            )}
+          </div>
+        </SheetContent>
+      </Sheet>
 
       <ConfirmDialog
         open={deleteId !== null}
