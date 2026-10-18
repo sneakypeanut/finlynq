@@ -1,4 +1,4 @@
-import { computeRolling, addMonths, budgetYearStart, monthsBetween } from "../src/lib/budgets/rolling.ts";
+import { computeRolling, addMonths, monthsBetween } from "../src/lib/budgets/rolling.ts";
 
 let pass = 0, fail = 0;
 const check = (label, got, want) => {
@@ -34,12 +34,22 @@ const M = (o) => new Map(Object.entries(o));
   check("chain compounds over months", [mar.carryIn, mar.effectiveBudget], [-100, 400]);
 }
 
-// 4. annual reset: December's carry does not reach January
+// 4. the carry runs straight through the year boundary — nothing clears it
 {
   const budgets = M({ "2025-12": 500, "2026-01": 500 });
   const spend = M({ "2025-12": 100 });
   const jan = computeRolling(1, "2026-01", budgets, spend);
-  check("carry resets in January", [jan.carryIn, jan.effectiveBudget], [0, 500]);
+  check("carry continues across the year boundary", [jan.carryIn, jan.effectiveBudget], [400, 900]);
+}
+
+// 4b. and it keeps compounding over many months
+{
+  const budgets = new Map(), spend = new Map();
+  for (let i = 1; i <= 6; i++) budgets.set(`2025-${String(i).padStart(2, "0")}`, 300);
+  budgets.set("2025-07", 300);
+  budgets.set("2025-08", 300);
+  const aug = computeRolling(1, "2025-08", budgets, spend); // nothing spent at all
+  check("unspent budgets accumulate month over month", aug.carryIn, 2100);
 }
 
 // 5. an unplanned month breaks the chain instead of inventing a carry
@@ -104,7 +114,6 @@ const M = (o) => new Map(Object.entries(o));
 
 // date helpers
 check("addMonths across a year", addMonths("2026-01", -1), "2025-12");
-check("budget year start", budgetYearStart("2026-10"), "2026-01");
 check("monthsBetween inclusive", monthsBetween("2025-11", "2026-02"), ["2025-11", "2025-12", "2026-01", "2026-02"]);
 
 console.log(`\n${pass} passed, ${fail} failed`);

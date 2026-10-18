@@ -11,8 +11,8 @@
  *   carry(m) = base(m-1) + carry(m-1) - spent(m-1)
  *
  * so underspending raises the next month's budget and overspending lowers it,
- * compounding month over month. The carry resets in January: a new budget year
- * starts clean, which is what makes the envelope survivable long term.
+ * compounding month over month, across year boundaries and indefinitely (bounded
+ * only by a lookback window so the walk stays cheap).
  *
  * A category whose base has been wrong for a whole year is not a discipline
  * problem, it is a bad number, so after `streakMonths` consecutive months on the
@@ -24,8 +24,8 @@ export type BudgetRow = { categoryId: number; month: string; amount: number };
 export type SpendRow = { categoryId: number | null; month: string; spent: number };
 
 export type RollingOptions = {
-  /** Month (1-12) that clears the carry. January by default. */
-  resetMonth?: number;
+  /** How far back the carry walk goes. Bounded for cost, not for policy. */
+  lookbackMonths?: number;
   /** Consecutive same-side months required before the base itself moves. */
   streakMonths?: number;
 };
@@ -74,13 +74,6 @@ export function monthsBetween(from: string, to: string): string[] {
   return out;
 }
 
-/** Start of the budget year containing `month`, honouring a non-January reset. */
-export function budgetYearStart(month: string, resetMonth = 1): string {
-  const [y, m] = month.split("-").map(Number);
-  const startYear = m >= resetMonth ? y : y - 1;
-  return `${startYear}-${String(resetMonth).padStart(2, "0")}`;
-}
-
 function median(values: number[]): number {
   if (values.length === 0) return 0;
   const s = [...values].sort((a, b) => a - b);
@@ -102,14 +95,13 @@ export function computeRolling(
   spendByMonth: Map<string, number>,
   opts: RollingOptions = {}
 ): RollingState {
-  const resetMonth = opts.resetMonth ?? 1;
+  const lookbackMonths = opts.lookbackMonths ?? 36;
   const streakMonths = opts.streakMonths ?? 12;
 
   const base = budgetByMonth.get(targetMonth) ?? 0;
 
-  // --- carry: walk from the start of the budget year to the month before target
-  const start = budgetYearStart(targetMonth, resetMonth);
-  const walk = monthsBetween(start, addMonths(targetMonth, -1));
+  // --- carry: continuous, oldest first. Nothing clears it at a year boundary.
+  const walk = monthsBetween(addMonths(targetMonth, -lookbackMonths), addMonths(targetMonth, -1));
   let carry = 0;
   for (const m of walk) {
     const b = budgetByMonth.get(m);

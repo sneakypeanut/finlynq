@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getBudgets, upsertBudget, deleteBudget, getBudgetRollover, getSpendingByCategoryAndCurrency, getBudgetsInRange, getMonthlySpendByCategory } from "@/lib/queries";
-import { computeRolling, indexHistory, addMonths, budgetYearStart } from "@/lib/budgets/rolling";
+import { computeRolling, indexHistory, addMonths } from "@/lib/budgets/rolling";
 import { requireAuth } from "@/lib/auth/require-auth";
 import { z } from "zod";
 import { validateBody, safeErrorMessage, logApiError } from "@/lib/validate";
@@ -86,11 +86,9 @@ export async function GET(request: NextRequest) {
   }
 
   if (includeRolling && month) {
-    // The carry chain needs the budget year to date; the streak rule needs the
-    // 12 months before this one, which can reach into the previous year.
-    const yearStart = budgetYearStart(month);
-    const streakStart = addMonths(month, -12);
-    const fromMonth = streakStart < yearStart ? streakStart : yearStart;
+    // The carry chain runs continuously (no year boundary clears it), so load the
+    // full lookback window the engine walks, which also covers the 12-month streak.
+    const fromMonth = addMonths(month, -36);
 
     const [y, m] = month.split("-").map(Number);
     const lastDay = new Date(y, m, 0).getDate();
