@@ -21,6 +21,7 @@ import {
   ChartPie,
   FlameKindling,
   GitBranch,
+  Home,
   MessageSquare,
   Bot,
   ChevronLeft,
@@ -89,6 +90,7 @@ const navGroups: { label: string; items: NavItem[] }[] = [
   {
     label: "Planning",
     items: [
+      { href: "/home-plan", label: "Home Plan", icon: Home, color: ACTIVE_ACCENT, mode: "prod" },
       { href: "/scenarios", label: "Scenarios", icon: GitBranch, color: ACTIVE_ACCENT, mode: "dev" },
       { href: "/fire", label: "FIRE Calculator", icon: FlameKindling, color: ACTIVE_ACCENT, mode: "dev" },
     ],
