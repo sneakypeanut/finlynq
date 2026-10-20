@@ -63,6 +63,7 @@ import {
 import { labelForSource, type TransactionSource } from "@/lib/tx-source";
 import { safeName } from "@/lib/safe-name";
 import { todayISO } from "@/lib/utils/date";
+import { ReceiptsPanel } from "@/components/transactions/receipts-panel";
 import {
   RuleEditorDialog,
   type Category as RuleEditorCategory,
@@ -1645,6 +1646,10 @@ export function TransactionDialog({
                 </div>
               );
             })()}
+
+            {/* Receipts — existing transactions only: an attachment row needs a
+                transaction id, and the bytes are DEK-encrypted per owner. */}
+            {editId && <ReceiptsPanel transactionId={editId} />}
 
             {/* Rule suggestion (FINLYNQ-125) — opt-in, new-entry tx mode only.
                 The tx saves + reconciles first; the rule is best-effort. */}

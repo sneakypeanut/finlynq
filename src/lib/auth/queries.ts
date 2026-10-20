@@ -769,6 +769,19 @@ async function unlinkUserUploadFiles(userId: string) {
   } catch {
     // Missing feedback_messages attachment columns on older deploys — don't block.
   }
+
+  // Transaction receipts — encrypted at rest with this user's DEK, so once the
+  // DEK is rewrapped/dropped the blobs are unreadable anyway; remove them so no
+  // orphaned ciphertext outlives the account.
+  try {
+    const receiptRows = await db
+      .select({ storagePath: s.transactionAttachments.storagePath })
+      .from(s.transactionAttachments)
+      .where(eq(s.transactionAttachments.userId, userId));
+    for (const row of receiptRows) await unlinkPath(row.storagePath);
+  } catch {
+    // Missing table on an older deploy — don't block.
+  }
 }
 
 /**
