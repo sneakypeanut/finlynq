@@ -1138,6 +1138,29 @@ export const transactionSplits = pgTable("transaction_splits", {
   tags: text("tags").default(""),
 });
 
+// Transaction attachments — receipts / invoices attached to ONE transaction.
+// Files live under <uploads>/receipts/<user_id>/<uuid>.<ext> (durable uploads
+// root, outside .next) encrypted at rest with the owner's DEK; `filename_enc`
+// is the DEK-encrypted original filename. `sha256` hashes the PLAINTEXT bytes
+// so a re-run of the receipt sweep can dedupe without decrypting.
+export const transactionAttachments = pgTable("transaction_attachments", {
+  id: serial("id").primaryKey(),
+  userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  transactionId: integer("transaction_id").notNull().references(() => transactions.id, { onDelete: "cascade" }),
+  storagePath: text("storage_path").notNull(),
+  filenameEnc: text("filename_enc").notNull(),
+  mimeType: text("mime_type").notNull(),
+  sizeBytes: integer("size_bytes").notNull(),
+  sha256: text("sha256").notNull(),
+  source: text("source").notNull().default("upload"), // 'upload' | 'email'
+  sourceRef: text("source_ref"), // Gmail thread id for source='email'
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [
+  index("idx_transaction_attachments_tx").on(t.transactionId),
+  index("idx_transaction_attachments_user_hash").on(t.userId, t.sha256),
+  check("transaction_attachments_source_check", sql`${t.source} IN ('upload','email')`),
+]);
+
 // ─── OAuth 2.1 Tables ──────────────────────────────────────────────────────
 
 /** Registered OAuth clients (Dynamic Client Registration, RFC 7591) */

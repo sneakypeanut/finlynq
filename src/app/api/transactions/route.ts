@@ -28,6 +28,7 @@ import { z } from "zod";
 import { validateBody, safeErrorMessage, logApiError } from "@/lib/validate";
 import { isSortableColumnId } from "@/lib/transactions/columns";
 import { deleteTransactionsCascade } from "@/lib/transactions/delete-cascade";
+import { receiptPathsForTransactions, unlinkReceiptFiles } from "@/lib/receipts/attachment-io";
 import { isTransactionSource, type TransactionSource } from "@/lib/tx-source";
 import { verifyOwnership, OwnershipError } from "@/lib/verify-ownership";
 import { securitiesReadEnabledForUser } from "@/lib/securities/flag";
@@ -930,6 +931,17 @@ export async function DELETE(request: NextRequest) {
   // single-statement delete, the dirty markers and the tx-cache invalidation
   // all live in `deleteTransactionsCascade` so the bulk / MCP / stdio delete
   // paths get identical semantics. Only the HTTP shaping stays here.
+  //
+  // Receipts: the attachment ROWS cascade with the transaction, but the
+  // encrypted blobs on disk do not. Collect their paths first, unlink only
+  // after the cascade commits, so a blocked delete never eats a receipt.
+  let receiptPaths: string[] = [];
+  try {
+    receiptPaths = await receiptPathsForTransactions(userId, [id]);
+  } catch {
+    /* table absent on an older schema — nothing to clean */
+  }
+
   try {
     const outcome = await deleteTransactionsCascade(userId, [id], {
       confirmReallocation,
@@ -950,6 +962,9 @@ export async function DELETE(request: NextRequest) {
         { status: 409 },
       );
     }
+    // Cascade committed — the receipt rows are gone, so drop their blobs.
+    await unlinkReceiptFiles(receiptPaths);
+
     return NextResponse.json({
       success: true,
       deletedIds: outcome.deletedIds,
