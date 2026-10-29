@@ -21,7 +21,7 @@ import {
 import { canEditPortfolioRow } from "@/lib/portfolio/operations";
 import type { TxRowForLots } from "@/lib/portfolio/lots/types";
 import { db, schema } from "@/db";
-import { and, eq, ne, or } from "drizzle-orm";
+import { and, eq, ne, or, inArray, sql } from "drizzle-orm";
 import { markSnapshotsDirty } from "@/lib/portfolio/snapshots/dirty";
 import { markCashSnapshotsDirty } from "@/lib/portfolio/snapshots/cash-dirty";
 import { z } from "zod";
@@ -390,6 +390,43 @@ export async function GET(request: NextRequest) {
     delete row.securitySymbolCt;
     return row;
   });
+
+  // Receipt counts for just the rows on this page, in one grouped query — the
+  // list view shows a paperclip badge so a transaction with an attached invoice
+  // is visible without opening every row.
+  const pageIds = decrypted
+    .map((r) => (r as { id?: number }).id)
+    .filter((n): n is number => typeof n === "number");
+  if (pageIds.length) {
+    const counts = await db
+      .select({
+        transactionId: schema.transactionAttachments.transactionId,
+        n: sql<number>`count(*)::int`,
+        // Oldest id — when a transaction has exactly one receipt the list can
+        // link straight at it instead of opening the editor.
+        firstId: sql<number>`min(${schema.transactionAttachments.id})::int`,
+      })
+      .from(schema.transactionAttachments)
+      .where(and(
+        eq(schema.transactionAttachments.userId, userId),
+        inArray(schema.transactionAttachments.transactionId, pageIds),
+      ))
+      .groupBy(schema.transactionAttachments.transactionId);
+    const byTx = new Map<number, { n: number; firstId: number }>(
+      counts.map((c: { transactionId: number; n: number; firstId: number }) => [
+        c.transactionId,
+        { n: c.n, firstId: c.firstId },
+      ]),
+    );
+    decrypted = decrypted.map((r) => {
+      const hit = byTx.get((r as { id: number }).id);
+      return {
+        ...r,
+        attachmentCount: hit?.n ?? 0,
+        attachmentId: hit && hit.n === 1 ? hit.firstId : undefined,
+      };
+    });
+  }
 
   return NextResponse.json({ data: decrypted, total });
 }
