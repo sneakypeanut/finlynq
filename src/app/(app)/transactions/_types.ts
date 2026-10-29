@@ -32,6 +32,11 @@ export type Transaction = {
   portfolioHoldingSymbol?: string | null;
   note: string;
   payee: string;
+  // Number of receipts attached (server-side count from transaction_attachments).
+  // 0/undefined mean "no paperclip badge".
+  attachmentCount?: number;
+  // Set only when exactly one receipt exists — the badge links straight at it.
+  attachmentId?: number;
   tags: string;
   isBusiness: number | null;
   linkId: string | null;

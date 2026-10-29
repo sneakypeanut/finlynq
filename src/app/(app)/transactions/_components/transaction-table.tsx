@@ -16,7 +16,7 @@ import { EmptyState } from "@/components/empty-state";
 import { formatCurrency, formatDate } from "@/lib/currency";
 import { formatAccountLabel } from "@/lib/account-label";
 import { labelForSource } from "@/lib/tx-source";
-import { Trash2, Pencil, Receipt, Scissors, Link2, ArrowUp, ArrowDown } from "lucide-react";
+import { Trash2, Pencil, Receipt, Scissors, Link2, ArrowUp, ArrowDown, Paperclip } from "lucide-react";
 import {
   COLUMN_LABELS as SHARED_COLUMN_LABELS,
   TOGGLEABLE_COLUMN_IDS as SHARED_TOGGLEABLE_COLUMN_IDS,
@@ -247,10 +247,47 @@ export function TransactionTable({
                       </span>
                     </TableCell>
                   );
-                case "payee":
+                case "payee": {
+                  const receipts = t.attachmentCount ?? 0;
+                  const badgeClass = "inline-flex shrink-0 items-center gap-0.5 rounded border border-emerald-500/40 bg-emerald-500/10 px-1 py-0.5 text-[10px] tabular-nums text-emerald-700 transition-colors hover:bg-emerald-500/20 dark:text-emerald-300";
                   return (
-                    <TableCell key={c.id} className="text-sm">{t.payee || "-"}</TableCell>
+                    <TableCell key={c.id} className="text-sm">
+                      <div className="flex items-center gap-1.5">
+                        <span className="truncate">{t.payee || "-"}</span>
+                        {receipts === 1 && t.attachmentId ? (
+                          // Exactly one receipt: open the document directly in a
+                          // new tab. Making the user open the editor to reach a
+                          // single file is friction with no upside.
+                          <a
+                            href={`/api/attachments/${t.attachmentId}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            title="Open receipt in a new tab"
+                            onClick={(e) => e.stopPropagation()}
+                            className={badgeClass}
+                          >
+                            <Paperclip className="h-3 w-3" aria-hidden />
+                          </a>
+                        ) : receipts > 1 ? (
+                          // Several documents (invoice + payment confirmation):
+                          // the editor is the only place that can show them all.
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              startEdit(t);
+                            }}
+                            title={`${receipts} receipts attached — click to view`}
+                            className={badgeClass}
+                          >
+                            <Paperclip className="h-3 w-3" aria-hidden />
+                            {receipts}
+                          </button>
+                        ) : null}
+                      </div>
+                    </TableCell>
                   );
+                }
                 case "portfolio":
                   return (
                     <TableCell key={c.id} className="text-sm text-muted-foreground">
