@@ -38,7 +38,9 @@ RUN npm run build
 # ── Stage 3: Production image ─────────────────────────────────────────────────
 # TODO(security): pin node:22-alpine to a digest — see deps stage.
 FROM node:22-alpine AS runner
-RUN apk add --no-cache curl netcat-openbsd
+# The standalone runtime uses node directly; npm/npx are build tools only.
+RUN apk upgrade --no-cache && apk add --no-cache curl netcat-openbsd \
+    && rm -rf /usr/local/lib/node_modules/npm /usr/local/bin/npm /usr/local/bin/npx
 WORKDIR /app
 
 ARG NEXT_BASE_PATH=""
