@@ -85,7 +85,7 @@ type SqlIndex = { name: string; unique: boolean; table: string; source: string }
 /** Every `CREATE [UNIQUE] INDEX` in one SQL file, in order. */
 function parseCreateIndexes(sql: string, source: string): SqlIndex[] {
   const re =
-    /CREATE\s+(UNIQUE\s+)?INDEX\s+(?:CONCURRENTLY\s+)?(?:IF\s+NOT\s+EXISTS\s+)?([a-zA-Z0-9_]+)\s+ON\s+(?:ONLY\s+)?(?:public\.)?([a-zA-Z0-9_]+)/gi;
+    /CREATE\s+(UNIQUE\s+)?INDEX\s+(?:CONCURRENTLY\s+)?(?:IF\s+NOT\s+EXISTS\s+)?"?([a-zA-Z0-9_]+)"?\s+ON\s+(?:ONLY\s+)?(?:public\.)?"?([a-zA-Z0-9_]+)"?/gi;
   const out: SqlIndex[] = [];
   let m: RegExpExecArray | null;
   while ((m = re.exec(sql))) {
@@ -97,7 +97,7 @@ function parseCreateIndexes(sql: string, source: string): SqlIndex[] {
 /** Every `DROP INDEX` in one SQL file. */
 function parseDropIndexes(sql: string): string[] {
   const re =
-    /DROP\s+INDEX\s+(?:CONCURRENTLY\s+)?(?:IF\s+EXISTS\s+)?(?:public\.)?([a-zA-Z0-9_]+)/gi;
+    /DROP\s+INDEX\s+(?:CONCURRENTLY\s+)?(?:IF\s+EXISTS\s+)?(?:public\.)?"?([a-zA-Z0-9_]+)"?/gi;
   const out: string[] = [];
   let m: RegExpExecArray | null;
   while ((m = re.exec(sql))) out.push(m[1]);
