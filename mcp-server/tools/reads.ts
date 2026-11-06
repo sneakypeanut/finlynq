@@ -314,7 +314,7 @@ export function registerReadsTools(server: McpServer, ctx: PgToolContext) {
   // ── get_budget_summary ─────────────────────────────────────────────────────
   server.tool(
     "get_budget_summary",
-    "Get the month's cash-flow budget: income, spending per category or group, debt payments and left to plan. Each line has budget vs actual and left (incl. carryover). Amounts are in the user's display currency; pass reportingCurrency to override.",
+    "Get the month's cash-flow budget: income, spending per category or group, debt payments and left to plan. Each line has budget vs actual and left (incl. carryover). A category budget on the same side for 12 months is moved to the median spent (auto_adjustment). Amounts are in the user's display currency; pass reportingCurrency to override.",
     {
       month: ymPeriod.describe("Month in YYYY-MM format"),
       reportingCurrency: z.string().optional().describe("ISO code for unified totals; defaults to user's display currency."),
@@ -329,6 +329,7 @@ export function registerReadsTools(server: McpServer, ctx: PgToolContext) {
         category: l.name,
         category_id: l.categoryId,
         budgeted: l.budgeted,
+        auto_adjustment: l.autoAdjustment,
         actual: l.actual,
         left: l.left,
         carried_in: l.carriedIn,
