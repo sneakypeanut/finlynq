@@ -181,7 +181,7 @@ function SubText({
   currency,
   showSpent,
 }: {
-  line: Pick<BudgetLine, "carriedIn" | "upcoming" | "rollover" | "actual">;
+  line: Pick<BudgetLine, "carriedIn" | "upcoming" | "rollover" | "actual" | "autoAdjustment">;
   currency: string;
   showSpent: boolean;
 }) {
@@ -195,6 +195,14 @@ function SubText({
   }
   if (line.rollover && line.carriedIn != null && line.carriedIn !== 0) {
     bits.push(<span key="c">carried in {formatCurrency(line.carriedIn, currency)}</span>);
+  }
+  if (line.autoAdjustment) {
+    const a = line.autoAdjustment;
+    bits.push(
+      <span key="a" className="text-sky-700 dark:text-sky-300" title={`${a.change > 0 ? "Raised" : "Lowered"} to the median spent: 12 budgeted months in a row ${a.direction} budget`}>
+        auto {a.change > 0 ? "↑" : "↓"} {formatCurrency(Math.abs(a.change), currency)}
+      </span>,
+    );
   }
   if (line.upcoming > 0) bits.push(<span key="u">{formatCurrency(line.upcoming, currency)} due later</span>);
   if (!bits.length) return null;
