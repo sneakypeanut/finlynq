@@ -6,6 +6,7 @@ RUN apk add --no-cache libc6-compat python3 make g++
 WORKDIR /app
 
 COPY package.json package-lock.json ./
+COPY packages/import-connectors/package.json ./packages/import-connectors/package.json
 # --ignore-scripts: the `postinstall` hook runs scripts/generate-mcp-tool-catalog.mjs
 # which needs files we haven't COPY'd yet. The builder stage regenerates the
 # catalog via the `prebuild` script before `npm run build` once the source is in.
@@ -18,6 +19,7 @@ RUN apk add --no-cache libc6-compat python3 make g++
 WORKDIR /app
 
 COPY package.json package-lock.json ./
+COPY packages/import-connectors/package.json ./packages/import-connectors/package.json
 RUN npm ci --ignore-scripts
 
 # `.dockerignore` (added in the Docker hardening pass) keeps `.env*`, `.git`,
