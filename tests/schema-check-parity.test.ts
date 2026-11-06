@@ -102,7 +102,7 @@ function balanced(sql: string, from: number): string {
  * a migration's `ADD CONSTRAINT <name> CHECK (…)`.
  */
 function parseChecks(sql: string, source: string): SqlCheck[] {
-  const re = /\bCONSTRAINT\s+([a-zA-Z0-9_]+)\s+CHECK\s*\(/gi;
+  const re = /\bCONSTRAINT\s+"?([a-zA-Z0-9_]+)"?\s+CHECK\s*\(/gi;
   const out: SqlCheck[] = [];
   let m: RegExpExecArray | null;
   while ((m = re.exec(sql))) {
@@ -113,7 +113,7 @@ function parseChecks(sql: string, source: string): SqlCheck[] {
 }
 
 function parseDropConstraints(sql: string): string[] {
-  const re = /DROP\s+CONSTRAINT\s+(?:IF\s+EXISTS\s+)?([a-zA-Z0-9_]+)/gi;
+  const re = /DROP\s+CONSTRAINT\s+(?:IF\s+EXISTS\s+)?"?([a-zA-Z0-9_]+)"?/gi;
   const out: string[] = [];
   let m: RegExpExecArray | null;
   while ((m = re.exec(sql))) out.push(m[1]);
