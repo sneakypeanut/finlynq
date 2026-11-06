@@ -10,6 +10,7 @@
 import type { DebtStatus } from "./debt-line";
 import { categoryKey, groupKey, type BudgetRole, type LineKey } from "./lines";
 import type { RolloverNegative } from "./carryover";
+import type { StreakAdjustment } from "./streak";
 
 export interface MonthCategoryInput {
   id: number;
@@ -50,6 +51,8 @@ export interface BudgetLine {
   name: string;
   /** This month's budget; null = none set (inside a by-group group, always null). */
   budgeted: number | null;
+  /** Set when a 12-month streak moved `budgeted` away from the stored budget (streak.ts). */
+  autoAdjustment?: StreakAdjustment;
   /** Spending: money out, refunds net. Income: money received. */
   actual: number;
   /** For rollover lines only. */
@@ -135,6 +138,8 @@ export interface BuildMonthInput {
   averages: ReadonlyMap<number, number>;
   /** Carry results for rollover lines, keyed by line key. */
   carry: ReadonlyMap<string, { carriedIn: number; left: number }>;
+  /** 12-month streak corrections by category id (streak.ts). */
+  streaks?: ReadonlyMap<number, StreakAdjustment>;
   upcoming: ReadonlyMap<number, number>;
   debt: readonly DebtLine[];
   accounts: readonly BudgetAccountInfo[];
@@ -217,13 +222,14 @@ export function buildBudgetMonth(input: BuildMonthInput): BudgetMonth {
         rollover: false, rolloverNegative: c.rolloverNegative, average3, upcoming, status: "ok",
       };
     }
-    const budgeted = input.budgets.get(c.id) ?? null;
+    const autoAdjustment = input.streaks?.get(c.id);
+    const budgeted = autoAdjustment?.budget ?? input.budgets.get(c.id) ?? null;
     const carry = c.rollover ? input.carry.get(key) : undefined;
     const carriedIn = c.rollover ? round2(carry?.carriedIn ?? 0) : null;
     const left =
       budgeted == null && !c.rollover ? null : round2((carriedIn ?? 0) + (budgeted ?? 0) - actual);
     return {
-      key, categoryId: c.id, name: c.name, budgeted, actual, carriedIn, left,
+      key, categoryId: c.id, name: c.name, budgeted, ...(autoAdjustment && { autoAdjustment }), actual, carriedIn, left,
       rollover: c.rollover, rolloverNegative: c.rolloverNegative, average3, upcoming,
       status: spendingStatus(budgeted, left, upcoming, c.rollover),
     };

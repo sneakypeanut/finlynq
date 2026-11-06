@@ -30,6 +30,7 @@ import { advanceStaleSubscriptionDatesSafe } from "@/lib/subscriptions/advance-n
 import { todayISO } from "@/lib/utils/date";
 import { walkCarryover, type RolloverNegative } from "./carryover";
 import { debtStatus, scheduledInMonth, type ScheduleRowLike } from "./debt-line";
+import { STREAK_LOOKBACK_MONTHS, streakAdjustment, type StreakAdjustment } from "./streak";
 import {
   automaticBudgetRole,
   categoryKey,
@@ -507,6 +508,8 @@ export async function loadBudgetMonth(
   let from = avgStart < month ? avgStart : month;
   const carryStart = earliestCarryStart(ctx, sets, month);
   if (carryStart && carryStart < from) from = carryStart;
+  const streakStart = shiftMonth(month, -STREAK_LOOKBACK_MONTHS);
+  if (streakStart < from) from = streakStart;
   const floor = shiftMonth(month, -120);
   if (from < floor) from = floor;
 
@@ -556,6 +559,18 @@ export async function loadBudgetMonth(
     carry.set(key, walkCarryover({ target: month, sets: sets.get(key) ?? {}, months, negative: gs.rolloverNegative }));
   }
 
+  const streaks = new Map<number, StreakAdjustment>();
+  for (const c of ctx.categories) {
+    if (c.type !== "E" || c.excluded || ctx.groupSettings.get(c.group)?.byGroup) continue;
+    const s = streakAdjustment({
+      target: month,
+      lastComplete,
+      budgets: budgets.categories.get(c.id) ?? {},
+      spent: actuals.get(c.id) ?? {},
+    });
+    if (s) streaks.set(c.id, s);
+  }
+
   const monthBudgets = new Map<number, number>();
   for (const [id, byMonth] of budgets.categories) if (byMonth[month] != null) monthBudgets.set(id, byMonth[month]);
   const groupBudgets = new Map<string, number>();
@@ -581,6 +596,7 @@ export async function loadBudgetMonth(
     actuals: monthActuals,
     averages,
     carry,
+    streaks,
     upcoming,
     debt,
     accounts: ctx.accounts,
