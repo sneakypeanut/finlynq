@@ -1,0 +1,86 @@
+name: Sync with upstream
+
+# Fork layout: `main` is always finlynq/finlynq main, untouched. `custom` is
+# this fork's own commits rebased on top of it. Every run fast-forwards main,
+# rebases custom onto it (authors are kept; the committer becomes the bot),
+# typechecks, and only then force-pushes custom. A conflict or a type error
+# fails the run and leaves custom as it was.
+#
+# Needs the SYNC_TOKEN secret: a fine-grained token for this repository with
+# Contents and Workflows read/write. GITHUB_TOKEN can't push commits that touch
+# .github/workflows, which both upstream syncs and this file's own commit do.
+# Scheduled workflows only run from the default branch, so custom must stay
+# the fork's default branch.
+
+on:
+  schedule:
+    - cron: "17 */3 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: sync-upstream
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require SYNC_TOKEN
+        env:
+          SYNC_TOKEN: ${{ secrets.SYNC_TOKEN }}
+        run: |
+          if [ -z "$SYNC_TOKEN" ]; then
+            echo "::error::Add a SYNC_TOKEN secret (fine-grained token, this repo, Contents + Workflows read/write)."
+            exit 1
+          fi
+
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          ref: custom
+          fetch-depth: 0
+          token: ${{ secrets.SYNC_TOKEN }}
+
+      - name: Make main match finlynq/finlynq main
+        run: |
+          git remote add upstream https://github.com/finlynq/finlynq.git
+          git fetch --no-tags upstream main
+          git push origin refs/remotes/upstream/main:refs/heads/main
+
+      - name: Rebase custom onto main
+        id: rebase
+        run: |
+          before=$(git rev-parse HEAD)
+          echo "before=$before" >> "$GITHUB_OUTPUT"
+          if git merge-base --is-ancestor upstream/main HEAD; then
+            echo "custom already sits on main."
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898283+github-actions[bot]@users.noreply.github.com"
+          if ! git rebase upstream/main; then
+            echo "::error::custom no longer rebases cleanly onto main. Conflicting files:"
+            git diff --name-only --diff-filter=U
+            git rebase --abort
+            exit 1
+          fi
+          echo "changed=true" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        if: steps.rebase.outputs.changed == 'true'
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Typecheck the rebased branch
+        if: steps.rebase.outputs.changed == 'true'
+        run: |
+          npm ci
+          npx tsc --noEmit
+
+      - name: Push custom
+        if: steps.rebase.outputs.changed == 'true'
+        run: git push --force-with-lease=custom:${{ steps.rebase.outputs.before }} origin HEAD:custom
