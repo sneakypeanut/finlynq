@@ -515,10 +515,12 @@ export default function HomePlanPage() {
               <div>
                 <p className="font-semibold text-foreground">Assumptions you can move above</p>
                 <p>
-                  Appreciation, investment return, mortgage rate, reserve and prices. Rent is assumed to escalate at
-                  3.1%/yr (TAL 2026 base component); your surplus is held flat, which assumes salary growth offsets rent
-                  growth. Maintenance 0.5%/yr, selling costs 5%. No capital-gains tax is modelled. Suburban condo fees and
-                  property-tax rates are estimates — verify against the actual listing and city.
+                  Appreciation, investment return, mortgage rate, reserve and prices. The mortgage rate starts at the
+                  discounted 5-year fixed after the Bank of Canada&apos;s 25 bp hike on 2026-10-29 (overnight target 2.50%).
+                  Rent is assumed to escalate at 3.1%/yr (TAL 2026 base component); your surplus is held flat, which assumes
+                  salary growth offsets rent growth. Maintenance 0.5%/yr, selling costs 5%. No capital-gains tax is modelled.
+                  Scenario A&apos;s price, condo fees and taxes come from the actual Centris listing (28809014); Scenario B&apos;s
+                  suburban fees and tax rate are estimates — verify against the listing and city.
                 </p>
               </div>
             </CardContent>

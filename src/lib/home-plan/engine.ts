@@ -49,7 +49,11 @@ export type Assumptions = {
 };
 
 export const DEFAULT_ASSUMPTIONS: Assumptions = {
-  mortgageRate: 0.0434,
+  /**
+   * Discounted 5-year fixed, carried up 25 bp with the Bank of Canada's hike on
+   * 2026-10-29 (target overnight 2.25% → 2.50%, prime 4.45% → 4.70%).
+   */
+  mortgageRate: 0.0459,
   amortizationYears: 25,
   investmentReturn: 0.035,
   appreciation: 0.025,
@@ -98,14 +102,15 @@ export type HomeScenario = {
 export const DEFAULT_SCENARIOS: HomeScenario[] = [
   {
     key: "A",
-    label: "1-bed condo, Griffintown",
-    purchasePrice: 400_000,
-    condoFeesMonthly: 425,
+    label: "1-bed + den condo, Ville-Marie",
+    purchasePrice: 368_000,
+    condoFeesMonthly: 691,
     utilitiesMonthly: 65,
-    propertyTaxRate: 0.0063,
+    // Listing's 2026 municipal + school taxes ($3,797) on the asking price.
+    propertyTaxRate: 0.010318,
     vehicleCost: 0,
     vehicleMonthly: 0,
-    note: "Centris median asking, 1-bed, 561 sq ft",
+    note: "1188 Av. Union #1412 · 650 sq ft, 2018 · garage + locker · Centris 28809014",
   },
   {
     key: "B",
