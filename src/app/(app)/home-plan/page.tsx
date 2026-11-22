@@ -247,6 +247,16 @@ export default function HomePlanPage() {
     setScenarios(DEFAULT_SCENARIOS.map((s) => ({ ...s })));
   };
 
+  const customised = useMemo(
+    () =>
+      JSON.stringify({ assumptions: a, scenarios }) !==
+      JSON.stringify({
+        assumptions: DEFAULT_ASSUMPTIONS,
+        scenarios: DEFAULT_SCENARIOS,
+      }),
+    [a, scenarios]
+  );
+
   const asOf = useMemo(() => new Date().toISOString().slice(0, 7), []);
 
   const model = useMemo(() => {
@@ -316,7 +326,7 @@ export default function HomePlanPage() {
                   ? "Plan not saved"
                   : "Plan saved"}
           </span>
-          {dirty ? (
+          {customised ? (
             <button
               onClick={resetPlan}
               className="inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-medium hover:bg-muted"
