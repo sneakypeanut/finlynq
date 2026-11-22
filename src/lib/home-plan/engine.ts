@@ -125,6 +125,12 @@ export const DEFAULT_SCENARIOS: HomeScenario[] = [
   },
 ];
 
+/** What the Home Plan page persists per user (settings key `home_plan_v1`). */
+export type HomePlanSettings = {
+  assumptions: Assumptions;
+  scenarios: HomeScenario[];
+};
+
 /** Everything the engine needs from the user's ledger, already reduced to monthly figures. */
 export type HomePlanProfile = {
   /** Average monthly income across the trailing window (net, deposits only). */

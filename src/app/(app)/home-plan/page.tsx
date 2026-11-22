@@ -24,11 +24,13 @@ import {
   Home,
   PiggyBank,
   RefreshCw,
+  RotateCcw,
   TrendingUp,
   Wallet,
 } from "lucide-react";
 import {
   type Assumptions,
+  type HomePlanSettings,
   type HomeScenario,
   DEFAULT_ASSUMPTIONS,
   DEFAULT_SCENARIOS,
@@ -98,6 +100,49 @@ function Slider({
   );
 }
 
+function NumberField({
+  label,
+  value,
+  min,
+  max,
+  step,
+  prefix,
+  suffix,
+  onChange,
+}: {
+  label: string;
+  value: number;
+  min: number;
+  max: number;
+  step: number;
+  prefix?: string;
+  suffix?: string;
+  onChange: (v: number) => void;
+}) {
+  return (
+    <label className="space-y-1 text-[11px]">
+      <span className="block text-muted-foreground">{label}</span>
+      <span className="flex items-center gap-1 rounded-md border px-2 py-1">
+        {prefix ? <span className="text-muted-foreground">{prefix}</span> : null}
+        <input
+          type="number"
+          inputMode="decimal"
+          className="w-full bg-transparent font-mono text-xs outline-none"
+          value={value}
+          min={min}
+          max={max}
+          step={step}
+          onChange={(e) => {
+            const next = Number(e.target.value);
+            if (Number.isFinite(next)) onChange(next);
+          }}
+        />
+        {suffix ? <span className="text-muted-foreground">{suffix}</span> : null}
+      </span>
+    </label>
+  );
+}
+
 export default function HomePlanPage() {
   const { displayCurrency } = useDisplayCurrency();
   const f = useCallback(
@@ -108,8 +153,16 @@ export default function HomePlanPage() {
   const [dash, setDash] = useState<DashboardLike | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-  const [a, setA] = useState<Assumptions>(DEFAULT_ASSUMPTIONS);
-  const [scenarios, setScenarios] = useState<HomeScenario[]>(DEFAULT_SCENARIOS);
+  const [a, setA] = useState<Assumptions>(() => ({ ...DEFAULT_ASSUMPTIONS }));
+  const [scenarios, setScenarios] = useState<HomeScenario[]>(() =>
+    DEFAULT_SCENARIOS.map((s) => ({ ...s }))
+  );
+  const [planStatus, setPlanStatus] = useState<
+    "loading" | "saved" | "saving" | "error"
+  >("loading");
+  // Once the user edits anything, every change is written back. A fresh user
+  // keeps tracking the shipped defaults until they touch a control.
+  const [dirty, setDirty] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -131,6 +184,68 @@ export default function HomePlanPage() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await fetch("/api/home-plan", { cache: "no-store" });
+        if (!res.ok) throw new Error(`home plan ${res.status}`);
+        const saved = (await res.json()) as HomePlanSettings;
+        if (cancelled) return;
+        setA(saved.assumptions);
+        setScenarios(saved.scenarios);
+        setPlanStatus("saved");
+      } catch {
+        if (!cancelled) setPlanStatus("error");
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!dirty) return;
+    const controller = new AbortController();
+    const timer = setTimeout(async () => {
+      setPlanStatus("saving");
+      try {
+        const res = await fetch("/api/home-plan", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ assumptions: a, scenarios }),
+          signal: controller.signal,
+        });
+        if (!res.ok) throw new Error(`home plan ${res.status}`);
+        setPlanStatus("saved");
+      } catch (e) {
+        if (e instanceof Error && e.name !== "AbortError") setPlanStatus("error");
+      }
+    }, 700);
+    return () => {
+      clearTimeout(timer);
+      controller.abort();
+    };
+  }, [dirty, a, scenarios]);
+
+  const patchAssumptions = (patch: Partial<Assumptions>) => {
+    setDirty(true);
+    setA((prev) => ({ ...prev, ...patch }));
+  };
+
+  const patchScenario = (index: number, patch: Partial<HomeScenario>) => {
+    setDirty(true);
+    setScenarios((prev) =>
+      prev.map((s, i) => (i === index ? { ...s, ...patch } : s))
+    );
+  };
+
+  const resetPlan = () => {
+    setDirty(true);
+    setA({ ...DEFAULT_ASSUMPTIONS });
+    setScenarios(DEFAULT_SCENARIOS.map((s) => ({ ...s })));
+  };
 
   const asOf = useMemo(() => new Date().toISOString().slice(0, 7), []);
 
@@ -186,13 +301,38 @@ export default function HomePlanPage() {
             {model ? ` Trailing ${model.profile.windowMonths} months · ${model.profile.windowFrom} → ${model.profile.windowTo}.` : ""}
           </p>
         </div>
-        <button
-          onClick={() => void load()}
-          className="inline-flex items-center gap-2 rounded-lg border px-3 py-1.5 text-xs font-medium hover:bg-muted"
-        >
-          <RefreshCw className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />
-          Recompute
-        </button>
+        <div className="flex items-center gap-2">
+          <span
+            className={`text-xs ${
+              planStatus === "error" ? "text-red-500" : "text-muted-foreground"
+            }`}
+            title="Assumptions and scenarios are saved to your account"
+          >
+            {planStatus === "loading"
+              ? "Loading plan…"
+              : planStatus === "saving"
+                ? "Saving…"
+                : planStatus === "error"
+                  ? "Plan not saved"
+                  : "Plan saved"}
+          </span>
+          {dirty ? (
+            <button
+              onClick={resetPlan}
+              className="inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-medium hover:bg-muted"
+            >
+              <RotateCcw className="h-3.5 w-3.5" />
+              Reset
+            </button>
+          ) : null}
+          <button
+            onClick={() => void load()}
+            className="inline-flex items-center gap-2 rounded-lg border px-3 py-1.5 text-xs font-medium hover:bg-muted"
+          >
+            <RefreshCw className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />
+            Recompute
+          </button>
+        </div>
       </div>
 
       {error ? (
@@ -367,7 +507,7 @@ export default function HomePlanPage() {
                 max={8}
                 step={0.1}
                 display={`${(a.appreciation * 100).toFixed(1)}%/yr`}
-                onChange={(v) => setA({ ...a, appreciation: v / 100 })}
+                onChange={(v) => patchAssumptions({ appreciation: v / 100 })}
               />
               <Slider
                 label="Investment return"
@@ -376,7 +516,7 @@ export default function HomePlanPage() {
                 max={9}
                 step={0.1}
                 display={`${(a.investmentReturn * 100).toFixed(1)}%/yr`}
-                onChange={(v) => setA({ ...a, investmentReturn: v / 100 })}
+                onChange={(v) => patchAssumptions({ investmentReturn: v / 100 })}
               />
               <Slider
                 label="Mortgage rate"
@@ -385,7 +525,7 @@ export default function HomePlanPage() {
                 max={8}
                 step={0.01}
                 display={`${(a.mortgageRate * 100).toFixed(2)}%`}
-                onChange={(v) => setA({ ...a, mortgageRate: v / 100 })}
+                onChange={(v) => patchAssumptions({ mortgageRate: v / 100 })}
               />
               <Slider
                 label="Emergency reserve"
@@ -394,34 +534,95 @@ export default function HomePlanPage() {
                 max={80000}
                 step={1000}
                 display={f(a.reserve)}
-                onChange={(v) => setA({ ...a, reserve: v })}
+                onChange={(v) => patchAssumptions({ reserve: v })}
               />
               <label className="flex items-center gap-2 text-xs">
                 <input
                   type="checkbox"
                   checked={a.includeBonus}
-                  onChange={(e) => setA({ ...a, includeBonus: e.target.checked })}
+                  onChange={(e) => patchAssumptions({ includeBonus: e.target.checked })}
                 />
                 <span>
                   Bank the annual bonus (+{f(model.profile.bonusEstimate)}/mo) — off by default, it isn&apos;t guaranteed
                 </span>
               </label>
-              {scenarios.map((sc, i) => (
-                <Slider
-                  key={sc.key}
-                  label={`${sc.label} — price`}
-                  value={sc.purchasePrice}
-                  min={200000}
-                  max={800000}
-                  step={5000}
-                  display={f(sc.purchasePrice)}
-                  onChange={(v) => {
-                    const next = [...scenarios];
-                    next[i] = { ...sc, purchasePrice: v };
-                    setScenarios(next);
-                  }}
-                />
-              ))}
+              <div className="space-y-3 sm:col-span-2 lg:col-span-3">
+                {scenarios.map((sc, i) => (
+                  <div key={sc.key} className="space-y-3 rounded-xl border p-3">
+                    <div className="flex items-center gap-2">
+                      <span className="rounded-md border px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
+                        {sc.key}
+                      </span>
+                      <input
+                        className="w-full bg-transparent text-sm font-semibold outline-none"
+                        value={sc.label}
+                        maxLength={80}
+                        aria-label={`Scenario ${sc.key} name`}
+                        onChange={(e) => patchScenario(i, { label: e.target.value })}
+                      />
+                    </div>
+                    <Slider
+                      label="Purchase price"
+                      value={sc.purchasePrice}
+                      min={150000}
+                      max={1200000}
+                      step={1000}
+                      display={f(sc.purchasePrice)}
+                      onChange={(v) => patchScenario(i, { purchasePrice: v })}
+                    />
+                    <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                      <NumberField
+                        label="Condo fees"
+                        value={Math.round(sc.condoFeesMonthly)}
+                        min={0}
+                        max={10000}
+                        step={10}
+                        prefix="$"
+                        suffix="/mo"
+                        onChange={(v) => patchScenario(i, { condoFeesMonthly: v })}
+                      />
+                      <NumberField
+                        label="Utilities"
+                        value={Math.round(sc.utilitiesMonthly)}
+                        min={0}
+                        max={5000}
+                        step={5}
+                        prefix="$"
+                        suffix="/mo"
+                        onChange={(v) => patchScenario(i, { utilitiesMonthly: v })}
+                      />
+                      <NumberField
+                        label="Municipal + school tax"
+                        value={Math.round(sc.purchasePrice * sc.propertyTaxRate)}
+                        min={0}
+                        max={200000}
+                        step={50}
+                        prefix="$"
+                        suffix="/yr"
+                        onChange={(v) =>
+                          patchScenario(i, {
+                            propertyTaxRate:
+                              sc.purchasePrice > 0 ? v / sc.purchasePrice : 0,
+                          })
+                        }
+                      />
+                      <NumberField
+                        label="Car running cost"
+                        value={Math.round(sc.vehicleMonthly)}
+                        min={0}
+                        max={10000}
+                        step={10}
+                        prefix="$"
+                        suffix="/mo"
+                        onChange={(v) => patchScenario(i, { vehicleMonthly: v })}
+                      />
+                    </div>
+                    {sc.note ? (
+                      <p className="text-[11px] text-muted-foreground">{sc.note}</p>
+                    ) : null}
+                  </div>
+                ))}
+              </div>
             </CardContent>
           </Card>
 
@@ -515,12 +716,13 @@ export default function HomePlanPage() {
               <div>
                 <p className="font-semibold text-foreground">Assumptions you can move above</p>
                 <p>
-                  Appreciation, investment return, mortgage rate, reserve and prices. The mortgage rate starts at the
-                  discounted 5-year fixed after the Bank of Canada&apos;s 25 bp hike on 2026-10-29 (overnight target 2.50%).
-                  Rent is assumed to escalate at 3.1%/yr (TAL 2026 base component); your surplus is held flat, which assumes
-                  salary growth offsets rent growth. Maintenance 0.5%/yr, selling costs 5%. No capital-gains tax is modelled.
-                  Scenario A&apos;s price, condo fees and taxes come from the actual Centris listing (28809014); Scenario B&apos;s
-                  suburban fees and tax rate are estimates — verify against the listing and city.
+                  Appreciation, investment return, mortgage rate, reserve, and each scenario&apos;s price, fees, utilities and
+                  taxes. Edits save to your account, so a new listing is a data change — not a new build. The mortgage rate
+                  starts at the discounted 5-year fixed after the Bank of Canada&apos;s 25 bp hike on 2026-10-29 (overnight
+                  target 2.50%). Rent is assumed to escalate at 3.1%/yr (TAL 2026 base component); your surplus is held flat,
+                  which assumes salary growth offsets rent growth. Maintenance 0.5%/yr, selling costs 5%. No capital-gains tax
+                  is modelled. Scenario A&apos;s price, condo fees and taxes come from the actual Centris listing (28809014);
+                  Scenario B&apos;s suburban fees and tax rate are estimates — verify against the listing and city.
                 </p>
               </div>
             </CardContent>
